@@ -1,7 +1,7 @@
 import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-
-public class FixedSizeArrayList<E> extends ArrayList<E> {
+public class FixedSizeArrayList<E> extends CopyOnWriteArrayList<E> {
 	/**
 	 * 
 	 */
@@ -10,12 +10,12 @@ public class FixedSizeArrayList<E> extends ArrayList<E> {
 	private int capacity;
 	
 	public FixedSizeArrayList(int capacity) {
-		super(capacity);
+		super();
 		this.capacity = capacity;
 	}
 	
 	@Override
-	public boolean add(E element) {
+	public synchronized boolean add(E element) {
 		boolean result = false;
 		if(this.size() < capacity)
 			result = true;
@@ -31,7 +31,7 @@ public class FixedSizeArrayList<E> extends ArrayList<E> {
 	 * @param index
 	 * @return
 	 */
-	public boolean addAtIndex(int index, E element) {
+	public synchronized boolean addAtIndex(int index, E element) {
 		boolean result = false;
 		if(this.size() < capacity)
 			result = true;
