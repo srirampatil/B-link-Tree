@@ -3,6 +3,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Stack;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -11,18 +12,18 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	public static int leafNodeCapacity;
 
 	private int height;
-	private BTreeNode root;
+	private AtomicReference<BTreeNode> root;
 
 	public BLinkTree(int _iNodeCap, int _lNodeCap) {
 		internalNodeCapacity = _iNodeCap;
 		leafNodeCapacity = _lNodeCap;
 		height = 0;
 
-		root = new LeafNode();
+		root = new AtomicReference<BTreeNode>(new BLinkTree.LeafNode());
 	}
 
 	public void clear() {
-		root = new LeafNode();
+		root = new AtomicReference<BTreeNode>(new BLinkTree.LeafNode());
 		height = 0;
 	}
 
@@ -87,7 +88,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	 */
 	public boolean add(KeyType key, ValueType value) {
 		Stack<BTreeNode> nodeStack = new Stack<BTreeNode>();
-		BTreeNode current = root;
+		BTreeNode current = root.get();
 		BTreeNode node = null;
 
 		// Go down to the leaf node
@@ -120,21 +121,21 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 				}
 
 				if (!result) {
-					BTreeNode newNode = current.splitNode();
+					Split split = current.splitNode();
 
 					lChild = current;
-					rChild = newNode;
+					rChild = split.newNode;
 
 					if (current instanceof BLinkTree.LeafNode)
-						key = lChild.highKey;
+						key = split.leftoverKey;
 					else
 						/* Pushing the leftover key after split to the parent */
-						key = ((IndexNode) lChild).leftoverKey;
+						key = split.leftoverKey;
 
 					/* Time to change the root */
 					if (nodeStack.empty()) {
-						if (lChild == root) {
-							newRoot = new IndexNode();
+						newRoot = new IndexNode();
+						if (root.compareAndSet(lChild, newRoot)) {
 							// ((BLinkTree.IndexNode) root)
 							// .insert(key, lChild, rChild);
 							height++;
@@ -154,8 +155,8 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 				}
 			}
 
-			if (newRoot != null)
-				root = newRoot;
+//			if (newRoot != null)
+//				root.set(newRoot);
 
 			/*
 			 * while (!nodeStack.empty()) { IndexNode tNode = (IndexNode)
@@ -164,6 +165,8 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			 * tNode.unlockNode(); }
 			 */
 
+		} catch (ArrayIndexOutOfBoundsException e) {
+			return add(key, value);
 		} finally {
 			current.unlockNode();
 		}
@@ -174,7 +177,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	@Override
 	public String toString() {
 		StringBuilder builder = new StringBuilder();
-		BTreeNode lChild = root;
+		BTreeNode lChild = root.get();
 		while (lChild instanceof BLinkTree.IndexNode)
 			lChild = ((IndexNode) lChild).childPointers.get(0);
 
@@ -191,7 +194,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	}
 
 	private void printInorder() {
-		printInorder(root);
+		printInorder(root.get());
 	}
 
 	private void printInorder(BTreeNode node) {
@@ -213,6 +216,16 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 		}
 	}
 
+	private class Split {
+		public BTreeNode newNode;
+		public KeyType leftoverKey;
+		
+		public Split(BTreeNode node, KeyType key) {
+			newNode = node;
+			leftoverKey = key;
+		}
+	}
+	
 	private abstract class BTreeNode {
 		public KeyType highKey;
 		public FixedSizeArrayList<KeyType> keyList;
@@ -243,17 +256,11 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			return builder.toString();
 		}
 
-		public abstract BTreeNode splitNode();
+		public abstract Split splitNode();
 	}
 
 	private class IndexNode extends BTreeNode {
 		public FixedSizeArrayList<BTreeNode> childPointers;
-
-		/*
-		 * Used while splitting an index node This key is pushed to the parent
-		 * node
-		 */
-		public KeyType leftoverKey;
 
 		public IndexNode() {
 			super(BLinkTree.internalNodeCapacity);
@@ -286,7 +293,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			return result;
 		}
 
-		public BTreeNode splitNode() {
+		public Split splitNode() {
 			IndexNode newNode = new IndexNode();
 
 			int half = keyList.size() / 2;
@@ -294,7 +301,6 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 				newNode.insert(keyList.get(i), childPointers.get(i),
 						childPointers.get(i + 1));
 
-			leftoverKey = keyList.get(half - 1);
 			keyList.subList(half - 1, keyList.size()).clear();
 			childPointers.subList(half, childPointers.size()).clear();
 			highKey = childPointers.get(childPointers.size() - 1).highKey;
@@ -302,7 +308,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			newNode.linkPointer = this.linkPointer;
 			this.linkPointer = newNode;
 
-			return newNode;
+			return new Split(newNode, keyList.get(half - 1));
 		}
 	}
 
@@ -328,7 +334,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			return result;
 		}
 
-		public BTreeNode splitNode() {
+		public Split splitNode() {
 			LeafNode newNode = new LeafNode();
 
 			int half = keyList.size() / 2;
@@ -342,12 +348,12 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			newNode.linkPointer = this.linkPointer;
 			this.linkPointer = newNode;
 
-			return newNode;
+			return new Split(newNode, this.highKey);
 		}
 	}
 
 	public static void main(String[] args) {
-		final BLinkTree<Integer, Integer> bTree = new BLinkTree<>(3, 3);
+		final BLinkTree<Integer, Integer> bTree = new BLinkTree<>(4, 4);
 
 		boolean sequence = false;
 
@@ -364,7 +370,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 					Thread t = new Thread(new Runnable() {
 						@Override
 						public void run() {
-							for (int j = 0; j < 3; j++) {
+							for (int j = 0; j < 5; j++) {
 								int randomInt = random.nextInt(10000);
 								cSet.add(randomInt);
 								bTree.add(randomInt, randomInt);
@@ -389,7 +395,6 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 
 				if (!cSet.toString().equals(bTree.toString()))
 					break;
-				// System.out.println(cSet.toString().equals(bTree.toString()));
 
 				cSet.clear();
 				bTree.clear();
