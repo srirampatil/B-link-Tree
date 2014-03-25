@@ -39,7 +39,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			if (node.highKey != null && key.compareTo(node.highKey) > 0
 					&& node.linkPointer != null)
 				return node.linkPointer;
-			
+
 			int index = 0;
 			while (index < node.keyList.size()
 					&& key.compareTo(node.keyList.get(index)) > 0)
@@ -51,7 +51,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			try {
 				if (index < ((IndexNode) node).childPointers.size())
 					return ((IndexNode) node).childPointers.get(index);
-				
+
 			} catch (ArrayIndexOutOfBoundsException e) {
 				continue;
 			}
@@ -87,6 +87,7 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	 * @return
 	 */
 	public boolean add(KeyType key, ValueType value) {
+		KeyType originalKey = key;
 		Stack<BTreeNode> nodeStack = new Stack<BTreeNode>();
 		BTreeNode current = root.get();
 		BTreeNode node = null;
@@ -121,7 +122,12 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 				}
 
 				if (!result) {
+					//System.out.println("Splitting " + current);
 					Split split = current.splitNode();
+//					System.out
+//							.println("Split: " + current + " and "
+//									+ split.newNode + " Leftover: "
+//									+ split.leftoverKey);
 
 					lChild = current;
 					rChild = split.newNode;
@@ -147,16 +153,16 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 							result = true;
 
 					} else {
-						current = nodeStack.pop();
-						current.lockNode();
-						current = moveRight(key, current);
-						lChild.unlockNode();
+						BTreeNode parent = nodeStack.pop();
+						parent.lockNode();
+						current.unlockNode();
+						current = moveRight(key, parent);
 					}
 				}
 			}
 
-//			if (newRoot != null)
-//				root.set(newRoot);
+			// if (newRoot != null)
+			// root.set(newRoot);
 
 			/*
 			 * while (!nodeStack.empty()) { IndexNode tNode = (IndexNode)
@@ -164,10 +170,13 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			 * .childPointers.get(tNode.childPointers.size() - 1).highKey;
 			 * tNode.unlockNode(); }
 			 */
+//			System.out.println(key + " added");
 
 		} catch (ArrayIndexOutOfBoundsException e) {
-			return add(key, value);
+			return add(originalKey, value);
+			// e.printStackTrace();
 		} finally {
+			// System.out.println(this.toString());
 			current.unlockNode();
 		}
 
@@ -219,13 +228,13 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	private class Split {
 		public BTreeNode newNode;
 		public KeyType leftoverKey;
-		
+
 		public Split(BTreeNode node, KeyType key) {
 			newNode = node;
 			leftoverKey = key;
 		}
 	}
-	
+
 	private abstract class BTreeNode {
 		public KeyType highKey;
 		public FixedSizeArrayList<KeyType> keyList;
@@ -240,11 +249,20 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 		}
 
 		public void lockNode() {
-			nodeLock.lock();
+//			if (!nodeLock.tryLock()) {
+//				System.out.println(Thread.currentThread().getName()
+//						+ " waiting for " + this);
+				nodeLock.lock();
+//			}
+
+//			System.out.println(Thread.currentThread().getName() + " locked "
+//					+ this);
 		}
 
 		public void unlockNode() {
 			nodeLock.unlock();
+//			System.out.println(Thread.currentThread().getName() + " unlocked "
+//					+ this);
 		}
 
 		@Override
@@ -273,6 +291,15 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 			while (index < keyList.size()
 					&& key.compareTo(keyList.get(index)) > 0)
 				index++;
+
+			// Re-adjust the structure
+//			if (childPointers.size() > index
+//					&& childPointers.get(index) != lChild) {
+//				key = childPointers.get(index).keyList.get(childPointers
+//						.get(index).keyList.size() - 1);
+//				rChild = lChild;
+//				lChild = childPointers.get(index);
+//			}
 
 			boolean result = keyList.addAtIndex(index, key);
 
@@ -353,31 +380,35 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 	}
 
 	public static void main(String[] args) {
-		final BLinkTree<Integer, Integer> bTree = new BLinkTree<>(4, 4);
+		final BLinkTree<Integer, Integer> bTree = new BLinkTree<>(1, 1);
 
 		boolean sequence = false;
 
 		// {{[25 30 30] 30 [35 40 40] 40} 40 {[45 50 50] 50 [53 55 55] 55 [60 70
 		// 70] 70} 70}
 
+		final ConcurrentSkipListSet<Integer> cSet = new ConcurrentSkipListSet<>();
+		final Random random = new Random();
+
 		if (!sequence) {
 			while (true) {
 				List<Thread> threadsList = new ArrayList<>();
-				final Random random = new Random();
-				final ConcurrentSkipListSet<Integer> cSet = new ConcurrentSkipListSet<>();
 
-				for (int i = 0; i < 3; i++) {
+				for (int i = 0; i < 2; i++) {
 					Thread t = new Thread(new Runnable() {
 						@Override
 						public void run() {
-							for (int j = 0; j < 5; j++) {
+
+							for (int j = 0; j < 3; j++) {
 								int randomInt = random.nextInt(10000);
 								cSet.add(randomInt);
+//								System.out.println(Thread.currentThread()
+//										.getName() + " adding " + randomInt);
 								bTree.add(randomInt, randomInt);
 							}
 						}
 					});
-
+					t.setName("Thread " + i);
 					threadsList.add(t);
 					t.start();
 				}
@@ -401,16 +432,29 @@ public class BLinkTree<KeyType extends Comparable<KeyType>, ValueType> {
 				threadsList.clear();
 			}
 		} else {
-			bTree.add(70, 50);
-			bTree.add(69, 60);
-			bTree.add(100, 30);
-			bTree.add(99, 40);
-			bTree.add(24, 70);
-			bTree.add(21, 55);
-			bTree.add(14, 45);
-			bTree.add(29, 53);
-			bTree.add(35, 35);
-			bTree.printInorder();
+			int numberOfElements = 100;
+			while (true) {
+				for (int j = 0; j < numberOfElements; j++) {
+					int randomInt = random.nextInt(10000);
+					cSet.add(randomInt);
+					bTree.add(randomInt, randomInt);
+				}
+
+				System.out.println("Expected: " + cSet.toString() + "\n"
+						+ "Actual: " + bTree.toString());
+
+				if (!cSet.toString().equals(bTree.toString()))
+					break;
+
+				cSet.clear();
+				bTree.clear();
+			}
+			/*
+			 * bTree.add(70, 50); bTree.add(69, 60); bTree.add(100, 30);
+			 * bTree.add(99, 40); bTree.add(24, 70); bTree.add(21, 55);
+			 * bTree.add(14, 45); bTree.add(29, 53); bTree.add(35, 35);
+			 * bTree.printInorder();
+			 */
 		}
 	}
 }
