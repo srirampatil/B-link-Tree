@@ -1,0 +1,4 @@
+1. lChild never changes
+2. If a node in between the two childPointers splits only rChild should change
+3. first release current lock then acquire the next lock. (Removes deadlock)
+4. 
